@@ -90,6 +90,7 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ### Backup & restore
 ```bash
 claude-bak backup                            # back up everything
+claude-bak backup --tag weekly              # back up everything, with a label
 claude-bak backup code --tag before-update  # code only, with a label
 claude-bak backup sessions                   # Cowork sessions only
 
