@@ -8,10 +8,19 @@ Backup, restore, and sync Claude state across machines.
 
 Claude שומר הכל בשני מקומות שאינם גיבוי אוטומטי:
 
+**macOS:**
+
 | מה | איפה | מה ייאבד אם תמחק |
 |----|------|-------------------|
 | הגדרות, skills, projects | `~/.claude/` | כל ה-skills שהתקנת, settings.json, היסטוריית projects |
 | Cowork sessions, קונפיגורציה | `~/Library/Application Support/Claude/` | **כל שיחות ה-Cowork**, sessions, הגדרות Desktop |
+
+**Windows:**
+
+| מה | איפה | מה ייאבד אם תמחק |
+|----|------|-------------------|
+| הגדרות, skills, projects | `%USERPROFILE%\.claude\` | כל ה-skills שהתקנת, settings.json, היסטוריית projects |
+| Cowork sessions, קונפיגורציה | `%APPDATA%\Claude\` | **כל שיחות ה-Cowork**, sessions, הגדרות Desktop |
 
 **אם מחקת את אחד מהתיקיות האלה ואין לך backup — הנתונים אבדו לצמיתות.**
 
@@ -54,6 +63,8 @@ Skill ל-Claude Code שמוסיף פקודת `claude-bak` — backup ושחזו�
 
 ## התקנה
 
+### macOS
+
 ```bash
 git clone https://github.com/azuko3/claude-backup-skill.git ~/.claude/skills/claude-backup
 bash ~/.claude/skills/claude-backup/install.sh
@@ -64,6 +75,23 @@ bash ~/.claude/skills/claude-backup/install.sh
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
+
+### Windows
+
+פתח **PowerShell** (לא Command Prompt) והרץ:
+
+```powershell
+git clone https://github.com/azuko3/claude-backup-skill.git "$env:USERPROFILE\.claude\skills\claude-backup"
+& "$env:USERPROFILE\.claude\skills\claude-backup\install.ps1"
+```
+
+אם מופיעה שגיאה על "running scripts is disabled", הרץ קודם:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+```
+
+לאחר ההתקנה, `claude-bak` עובד מכל טרמינל (PowerShell, Command Prompt, Windows Terminal).
 
 ---
 
