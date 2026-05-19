@@ -395,13 +395,169 @@ code\telemetry\
     }
 }
 
+# ─── tree ────────────────────────────────────────────────────────────────────
+function Do-Tree {
+    param([string]$snapArg = "latest", [string]$target = "all")
+    $snaps = List-Snapshots
+    $snapDir = if ($snapArg -eq "latest") {
+        if ($snaps.Count -eq 0) { Die "No snapshots found. Run: claude-bak backup" }
+        $snaps[0]
+    } else {
+        $p = Join-Path $BACKUP_ROOT $snapArg
+        if (-not (Test-Path $p)) { Die "Snapshot '$snapArg' not found" }
+        $p
+    }
+    $snapId = Split-Path $snapDir -Leaf
+    Write-Host ""
+    Write-Host "Snapshot: $snapId" -ForegroundColor White
+
+    function Print-Tree { param([string]$dir, [string]$prefix)
+        $items = Get-ChildItem $dir -ErrorAction SilentlyContinue | Sort-Object Name
+        $count = $items.Count; $i = 0
+        foreach ($item in $items) {
+            $i++
+            $connector = if ($i -eq $count) { "└── " } else { "├── " }
+            $childPrefix = if ($i -eq $count) { "$prefix    " } else { "$prefix│   " }
+            if ($item.PSIsContainer) {
+                $sz = Human-Size $item.FullName
+                Write-Host "$prefix$connector" -NoNewline
+                Write-Host "$($item.Name)/" -ForegroundColor Blue -NoNewline
+                Write-Host " ($sz)" -ForegroundColor DarkGray
+                Print-Tree $item.FullName $childPrefix
+            } else {
+                $sz = if ($item.Length -gt 1MB) { "{0:N1}MB" -f ($item.Length/1MB) }
+                      elseif ($item.Length -gt 1KB) { "{0:N1}KB" -f ($item.Length/1KB) }
+                      else { "$($item.Length)B" }
+                Write-Host "$prefix$connector$($item.Name) " -NoNewline
+                Write-Host "($sz)" -ForegroundColor DarkGray
+            }
+        }
+    }
+
+    foreach ($t in @("code","desktop")) {
+        if ($target -ne "all" -and $target -ne $t) { continue }
+        $tdir = Join-Path $snapDir $t
+        if (-not (Test-Path $tdir)) { continue }
+        Write-Host ""
+        Write-Host "$t/" -ForegroundColor Yellow -NoNewline
+        Write-Host " ($(Human-Size $tdir))" -ForegroundColor DarkGray
+        Print-Tree $tdir ""
+    }
+    Write-Host ""
+}
+
+# ─── diff ─────────────────────────────────────────────────────────────────────
+function Do-Diff {
+    param([string]$snapA = "", [string]$snapB = "")
+    $snaps = List-Snapshots
+    if (-not $snapA) {
+        if ($snaps.Count -lt 2) { Die "Need at least 2 snapshots to diff" }
+        $snapA = Split-Path $snaps[1] -Leaf
+        $snapB = Split-Path $snaps[0] -Leaf
+    } elseif (-not $snapB) {
+        $snapB = Split-Path $snaps[0] -Leaf
+    }
+
+    $dirA = Join-Path $BACKUP_ROOT $snapA
+    $dirB = Join-Path $BACKUP_ROOT $snapB
+    if (-not (Test-Path $dirA)) { Die "Snapshot '$snapA' not found" }
+    if (-not (Test-Path $dirB)) { Die "Snapshot '$snapB' not found" }
+
+    Write-Host ""
+    Write-Host "Diff: $snapA → $snapB" -ForegroundColor White
+    Write-Host ("─" * 52)
+
+    $filesA = Get-ChildItem $dirA -Recurse -File | ForEach-Object { $_.FullName.Replace("$dirA\","") } | Where-Object { $_ -ne "manifest.json" }
+    $filesB = Get-ChildItem $dirB -Recurse -File | ForEach-Object { $_.FullName.Replace("$dirB\","") } | Where-Object { $_ -ne "manifest.json" }
+
+    $added   = $filesB | Where-Object { $_ -notin $filesA }
+    $removed = $filesA | Where-Object { $_ -notin $filesB }
+    $common  = $filesA | Where-Object { $_ -in $filesB }
+
+    foreach ($f in $added)   { Write-Host "+ $f" -ForegroundColor Green }
+    foreach ($f in $removed) { Write-Host "- $f" -ForegroundColor Red }
+    foreach ($f in $common) {
+        $sA = (Get-Item (Join-Path $dirA $f) -ErrorAction SilentlyContinue).Length
+        $sB = (Get-Item (Join-Path $dirB $f) -ErrorAction SilentlyContinue).Length
+        if ($sA -ne $sB) { Write-Host "~ $f " -ForegroundColor Yellow -NoNewline; Write-Host "($sA → $sB bytes)" -ForegroundColor DarkGray }
+    }
+
+    Write-Host ""
+    Write-Host "Summary: " -NoNewline -ForegroundColor DarkGray
+    Write-Host "+$($added.Count) added  " -ForegroundColor Green -NoNewline
+    Write-Host "-$($removed.Count) removed  " -ForegroundColor Red -NoNewline
+    Write-Host "~$(($common | Where-Object { (Get-Item (Join-Path $dirA $_) -EA SilentlyContinue).Length -ne (Get-Item (Join-Path $dirB $_) -EA SilentlyContinue).Length }).Count) changed" -ForegroundColor Yellow
+    Write-Host ""
+}
+
+# ─── show ─────────────────────────────────────────────────────────────────────
+function Do-Show {
+    param([string]$snapArg = "latest", [string]$filePath = "")
+    if (-not $filePath) { Die "Usage: claude-bak show [snapshot-id] <file-path>`nExample: claude-bak show latest code/settings.json" }
+
+    $snaps = List-Snapshots
+    $snapDir = if ($snapArg -eq "latest") {
+        if ($snaps.Count -eq 0) { Die "No snapshots found" }
+        $snaps[0]
+    } else {
+        $p = Join-Path $BACKUP_ROOT $snapArg; if (-not (Test-Path $p)) { Die "Snapshot '$snapArg' not found" }; $p
+    }
+
+    $full = Join-Path $snapDir $filePath
+    if (-not (Test-Path $full)) {
+        Err "File not found: $filePath"
+        Write-Host "Tip: use 'claude-bak find <pattern>' to search for files"
+        exit 1
+    }
+
+    $snapId = Split-Path $snapDir -Leaf
+    Write-Host ""
+    Write-Host "$snapId → $filePath" -ForegroundColor DarkGray
+    Write-Host ("─" * 52)
+    Get-Content $full
+    Write-Host ""
+}
+
+# ─── find ─────────────────────────────────────────────────────────────────────
+function Do-Find {
+    param([string]$pattern = "", [string]$snapArg = "latest")
+    if (-not $pattern) { Die "Usage: claude-bak find <pattern> [snapshot-id]`nExample: claude-bak find settings.json" }
+
+    $snaps = List-Snapshots
+    $snapDir = if ($snapArg -eq "latest") {
+        if ($snaps.Count -eq 0) { Die "No snapshots found" }
+        $snaps[0]
+    } else {
+        $p = Join-Path $BACKUP_ROOT $snapArg; if (-not (Test-Path $p)) { Die "Snapshot '$snapArg' not found" }; $p
+    }
+
+    $snapId = Split-Path $snapDir -Leaf
+    Write-Host ""
+    Write-Host "Searching `"$pattern`" in snapshot: $snapId" -ForegroundColor White
+    Write-Host ("─" * 52)
+
+    $results = Get-ChildItem $snapDir -Recurse -Filter "*$pattern*" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -ne "manifest.json" }
+
+    foreach ($r in $results) {
+        $rel = $r.FullName.Replace("$snapDir\","")
+        $sz = Human-Size $r.FullName
+        Write-Host "  $rel " -NoNewline; Write-Host "($sz)" -ForegroundColor DarkGray
+    }
+
+    Write-Host ""
+    if ($results.Count -eq 0) { Warn "No files matching '$pattern'" }
+    else { Write-Host "$($results.Count) result(s). Use: claude-bak show $snapId <path>" -ForegroundColor DarkGray }
+    Write-Host ""
+}
+
 # ─── main ────────────────────────────────────────────────────────────────────
 function Show-Usage {
     Write-Host @"
 
 Usage: claude-bak <command> [options]
 
-Commands:
+Backup & restore:
   backup  [all|code|desktop] [-Tag <name>]     Create a snapshot
   restore [all|code|desktop] [snapshot-id]     Restore (default: latest)
   list                                          Show all snapshots
@@ -409,13 +565,20 @@ Commands:
   sync    push|pull [-Remote <url>]             Git-based sync
   setup   local|git                             Configure backend
 
+Explore:
+  tree    [snapshot-id] [all|code|desktop]      Browse files + sizes
+  diff    [snapshot-a] [snapshot-b]             What changed between two snapshots
+  show    [snapshot-id] <file-path>             Print contents of a file
+  find    <pattern> [snapshot-id]               Search files by name
+
 Examples:
   claude-bak backup
   claude-bak backup code -Tag before-update
   claude-bak restore
-  claude-bak restore all 20260519-143022
-  claude-bak setup git
-  claude-bak sync push
+  claude-bak tree
+  claude-bak diff
+  claude-bak find settings.json
+  claude-bak show latest code/settings.json
 "@
 }
 
@@ -427,6 +590,10 @@ switch ($Command.ToLower()) {
     "status"  { Do-Status }
     "sync"    { Do-Sync    -direction $(if ($Arg1) { $Arg1 } else { "push" }) }
     "setup"   { Do-Setup   -mode $(if ($Arg1) { $Arg1 } else { "local" }) }
+    "tree"    { Do-Tree    -snapArg $(if ($Arg1) { $Arg1 } else { "latest" }) -target $(if ($Arg2) { $Arg2 } else { "all" }) }
+    "diff"    { Do-Diff    -snapA $Arg1 -snapB $Arg2 }
+    "show"    { Do-Show    -snapArg $(if ($Arg1) { $Arg1 } else { "latest" }) -filePath $Arg2 }
+    "find"    { Do-Find    -pattern $Arg1 -snapArg $(if ($Arg2) { $Arg2 } else { "latest" }) }
     "help"    { Show-Usage }
     default   { Err "Unknown command: $Command"; Show-Usage; exit 1 }
 }

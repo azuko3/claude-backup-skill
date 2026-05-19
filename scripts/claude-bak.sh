@@ -521,26 +521,236 @@ GITIGNORE
   esac
 }
 
+# ─── tree ────────────────────────────────────────────────────────────────────
+do_tree() {
+  local snap_arg="${1:-latest}"
+  local target="${2:-all}"
+
+  local snap_dir
+  if [[ "$snap_arg" == "latest" ]]; then
+    snap_dir=$(list_snapshots | head -1)
+    [[ -n "$snap_dir" ]] || die "No snapshots found. Run: claude-bak backup"
+  else
+    snap_dir="$BACKUP_ROOT/$snap_arg"
+    [[ -d "$snap_dir" ]] || die "Snapshot '$snap_arg' not found"
+  fi
+
+  local snap_id
+  snap_id=$(basename "$snap_dir")
+  echo ""
+  printf '\033[1mSnapshot: %s\033[0m\n' "$snap_id"
+
+  _print_tree() {
+    local dir="$1"
+    local prefix="$2"
+    local entries=()
+    while IFS= read -r entry; do
+      [[ -n "$entry" ]] && entries+=("$entry")
+    done < <(ls -1 "$dir" 2>/dev/null)
+    local count=${#entries[@]}
+    local i=0
+    for entry in ${entries[@]+"${entries[@]}"}; do
+      i=$(( i + 1 ))
+      local path="$dir/$entry"
+      local connector="├── "
+      local child_prefix="$prefix│   "
+      if [[ $i -eq $count ]]; then
+        connector="└── "
+        child_prefix="$prefix    "
+      fi
+      if [[ -d "$path" ]]; then
+        local size
+        size=$(human_size "$path")
+        printf '%s%s\033[1;34m%s/\033[0m \033[2m(%s)\033[0m\n' "$prefix" "$connector" "$entry" "$size"
+        _print_tree "$path" "$child_prefix"
+      else
+        local fsize
+        fsize=$(du -sh "$path" 2>/dev/null | awk '{print $1}')
+        printf '%s%s%s \033[2m(%s)\033[0m\n' "$prefix" "$connector" "$entry" "$fsize"
+      fi
+    done
+  }
+
+  for t in code desktop; do
+    [[ "$target" != "all" && "$target" != "$t" ]] && continue
+    local tdir="$snap_dir/$t"
+    [[ -d "$tdir" ]] || continue
+    echo ""
+    printf '\033[1;33m%s/\033[0m \033[2m(%s)\033[0m\n' "$t" "$(human_size "$tdir")"
+    _print_tree "$tdir" ""
+  done
+  echo ""
+}
+
+# ─── diff ─────────────────────────────────────────────────────────────────────
+do_diff() {
+  local snap_a="${1:-}"
+  local snap_b="${2:-}"
+
+  # default: compare last two snapshots
+  local snaps=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && snaps+=("$line")
+  done < <(list_snapshots)
+
+  if [[ -z "$snap_a" ]]; then
+    [[ ${#snaps[@]} -ge 2 ]] || die "Need at least 2 snapshots to diff. Run: claude-bak backup"
+    snap_a=$(basename "${snaps[1]}")
+    snap_b=$(basename "${snaps[0]}")
+  elif [[ -z "$snap_b" ]]; then
+    snap_b=$(basename "${snaps[0]}")
+  fi
+
+  local dir_a="$BACKUP_ROOT/$snap_a"
+  local dir_b="$BACKUP_ROOT/$snap_b"
+  [[ -d "$dir_a" ]] || die "Snapshot '$snap_a' not found"
+  [[ -d "$dir_b" ]] || die "Snapshot '$snap_b' not found"
+
+  echo ""
+  printf '\033[1mDiff: %s → %s\033[0m\n' "$snap_a" "$snap_b"
+  printf '%s\n' "────────────────────────────────────────────────────"
+
+  local added=0 removed=0 changed=0
+
+  # files in B not in A = added
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    if [[ ! -f "$dir_a/$f" ]]; then
+      printf '\033[1;32m+ %s\033[0m\n' "$f"
+      added=$(( added + 1 ))
+    fi
+  done < <(find "$dir_b" -type f | sed "s|$dir_b/||" | sort)
+
+  # files in A not in B = removed
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    if [[ ! -f "$dir_b/$f" ]]; then
+      printf '\033[1;31m- %s\033[0m\n' "$f"
+      removed=$(( removed + 1 ))
+    fi
+  done < <(find "$dir_a" -type f | sed "s|$dir_a/||" | sort)
+
+  # files in both but different size = changed
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    if [[ -f "$dir_b/$f" ]]; then
+      local size_a size_b
+      size_a=$(stat -f%z "$dir_a/$f" 2>/dev/null || echo 0)
+      size_b=$(stat -f%z "$dir_b/$f" 2>/dev/null || echo 0)
+      if [[ "$size_a" != "$size_b" ]]; then
+        printf '\033[1;33m~ %s\033[0m \033[2m(%s → %s bytes)\033[0m\n' "$f" "$size_a" "$size_b"
+        changed=$(( changed + 1 ))
+      fi
+    fi
+  done < <(find "$dir_a" -type f | sed "s|$dir_a/||" | sort)
+
+  echo ""
+  printf '\033[2mSummary: \033[1;32m+%d added\033[0m  \033[1;31m-%d removed\033[0m  \033[1;33m~%d changed\033[0m\n' \
+    "$added" "$removed" "$changed"
+  echo ""
+}
+
+# ─── show ─────────────────────────────────────────────────────────────────────
+do_show() {
+  local snap_arg="${1:-latest}"
+  local file_path="${2:-}"
+
+  [[ -n "$file_path" ]] || die "Usage: claude-bak show [snapshot-id] <file-path>\nExample: claude-bak show latest code/settings.json"
+
+  local snap_dir
+  if [[ "$snap_arg" == "latest" ]]; then
+    snap_dir=$(list_snapshots | head -1)
+    [[ -n "$snap_dir" ]] || die "No snapshots found. Run: claude-bak backup"
+  else
+    snap_dir="$BACKUP_ROOT/$snap_arg"
+    [[ -d "$snap_dir" ]] || die "Snapshot '$snap_arg' not found"
+  fi
+
+  local full_path="$snap_dir/$file_path"
+  [[ -f "$full_path" ]] || {
+    err "File not found: $file_path"
+    echo "Tip: use 'claude-bak find <pattern>' to search for files"
+    exit 1
+  }
+
+  local snap_id
+  snap_id=$(basename "$snap_dir")
+  echo ""
+  printf '\033[2m%s → %s\033[0m\n' "$snap_id" "$file_path"
+  printf '%s\n' "────────────────────────────────────────────────────"
+  cat "$full_path"
+  echo ""
+}
+
+# ─── find ─────────────────────────────────────────────────────────────────────
+do_find() {
+  local pattern="${1:-}"
+  local snap_arg="${2:-latest}"
+
+  [[ -n "$pattern" ]] || die "Usage: claude-bak find <pattern> [snapshot-id]\nExample: claude-bak find settings.json"
+
+  local snap_dir
+  if [[ "$snap_arg" == "latest" ]]; then
+    snap_dir=$(list_snapshots | head -1)
+    [[ -n "$snap_dir" ]] || die "No snapshots found. Run: claude-bak backup"
+  else
+    snap_dir="$BACKUP_ROOT/$snap_arg"
+    [[ -d "$snap_dir" ]] || die "Snapshot '$snap_arg' not found"
+  fi
+
+  local snap_id
+  snap_id=$(basename "$snap_dir")
+  echo ""
+  printf '\033[1mSearching "%s" in snapshot: %s\033[0m\n' "$pattern" "$snap_id"
+  printf '%s\n' "────────────────────────────────────────────────────"
+
+  local results=0
+  while IFS= read -r match; do
+    [[ -n "$match" ]] || continue
+    local rel
+    rel=$(echo "$match" | sed "s|$snap_dir/||")
+    local fsize
+    fsize=$(du -sh "$match" 2>/dev/null | awk '{print $1}')
+    printf '  %s \033[2m(%s)\033[0m\n' "$rel" "$fsize"
+    results=$(( results + 1 ))
+  done < <(find "$snap_dir" -name "*$pattern*" -not -name "manifest.json" 2>/dev/null | sort)
+
+  echo ""
+  if [[ $results -eq 0 ]]; then
+    warn "No files matching '$pattern'"
+  else
+    printf '\033[2m%d result(s). Use: claude-bak show %s <path>\033[0m\n' "$results" "$snap_id"
+  fi
+  echo ""
+}
+
 # ─── main ────────────────────────────────────────────────────────────────────
 usage() {
   cat <<'USAGE'
 Usage: claude-bak <command> [options]
 
-Commands:
-  backup  [all|code|desktop] [--tag <name>]   Create a snapshot
-  restore [all|code|desktop] [snapshot-id]    Restore (default: latest)
-  list                                         Show all snapshots
-  status                                       Show backup status
-  sync    push|pull [--remote <url>]           Git-based sync
-  setup   local|git|icloud                     Configure backend
+Backup & restore:
+  backup  [all|code|desktop] [--tag <name>]          Create a snapshot
+  restore [all|code|desktop] [snapshot-id|latest]    Restore a snapshot
+  list                                                Show all snapshots
+  status                                              Show backup status
+  sync    push|pull [--remote <url>]                  Git-based sync
+  setup   local|git|icloud                            Configure backend
+
+Explore:
+  tree    [snapshot-id] [all|code|desktop]            Browse files + sizes
+  diff    [snapshot-a] [snapshot-b]                   What changed between two snapshots
+  show    [snapshot-id] <file-path>                   Print contents of a file
+  find    <pattern> [snapshot-id]                     Search files by name
 
 Examples:
   claude-bak backup                            # backup everything
   claude-bak backup code --tag before-update
   claude-bak restore                           # restore latest
-  claude-bak restore all 20260519-143022
-  claude-bak setup git
-  claude-bak sync push
+  claude-bak tree                              # browse latest snapshot
+  claude-bak diff                              # compare last two snapshots
+  claude-bak find settings.json               # find a file
+  claude-bak show latest code/settings.json   # read a file
 USAGE
 }
 
@@ -555,6 +765,10 @@ case "$cmd" in
   status)  do_status  "$@" ;;
   sync)    do_sync    "$@" ;;
   setup)   do_setup   "$@" ;;
+  tree)    do_tree    "$@" ;;
+  diff)    do_diff    "$@" ;;
+  show)    do_show    "$@" ;;
+  find)    do_find    "$@" ;;
   help|--help|-h) usage ;;
   *) err "Unknown command: $cmd"; usage; exit 1 ;;
 esac
