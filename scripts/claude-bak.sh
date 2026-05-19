@@ -166,8 +166,8 @@ do_backup() {
     ok "Code: $(count_files "$dest") files ($(human_size "$dest"))"
   fi
 
-  if [[ "$target" == "all" || "$target" == "desktop" ]]; then
-    log "Backing up Claude Desktop …"
+  if [[ "$target" == "all" || "$target" == "sessions" ]]; then
+    log "Backing up Claude sessions …"
     if [[ ! -d "$CLAUDE_DESKTOP_DIR" ]]; then
       warn "Claude Desktop directory not found — skipping"
     else
@@ -175,7 +175,7 @@ do_backup() {
       if pgrep -x "Claude" > /dev/null 2>&1; then
         warn "Claude Desktop appears to be running — backup will proceed but data may be inconsistent"
       fi
-      local dest="$snap_dir/desktop"
+      local dest="$snap_dir/sessions"
       mkdir -p "$dest"
       rsync -a --delete \
         --exclude='Cache/' \
@@ -263,6 +263,12 @@ do_restore() {
 
   # confirm
   printf '\n\033[1;33mThis will overwrite your current Claude state with snapshot: %s\033[0m\n' "$snap_id"
+  if [[ "$target" == "all" || "$target" == "code" ]]; then
+    printf '  \033[1mcode:\033[0m     full mirror — files not in snapshot will be deleted\n'
+  fi
+  if [[ "$target" == "all" || "$target" == "sessions" ]]; then
+    printf '  \033[1msessions:\033[0m overwrite only — new files added since backup will be kept\n'
+  fi
   printf 'Continue? [y/N] '
   read -r answer
   [[ "$(echo "$answer" | tr '[:upper:]' '[:lower:]')" == "y" ]] || { log "Aborted."; exit 0; }
@@ -278,8 +284,8 @@ do_restore() {
     fi
   fi
 
-  if [[ "$target" == "all" || "$target" == "desktop" ]]; then
-    local src="$snap_dir/desktop"
+  if [[ "$target" == "all" || "$target" == "sessions" ]]; then
+    local src="$snap_dir/sessions"
     if [[ -d "$src" ]]; then
       if pgrep -x "Claude" > /dev/null 2>&1; then
         warn "Claude Desktop is running — quit it first for a clean restore"
@@ -292,7 +298,7 @@ do_restore() {
         "$src/" "$CLAUDE_DESKTOP_DIR/" 2>/dev/null
       ok "Desktop restored"
     else
-      warn "No desktop backup in this snapshot"
+      warn "No sessions backup in this snapshot"
     fi
   fi
 
@@ -458,14 +464,14 @@ do_setup() {
       # create .gitignore
       cat > "$BACKUP_ROOT/.gitignore" <<'GITIGNORE'
 # large electron caches — not worth storing
-desktop/Cache/
-desktop/Code Cache/
-desktop/GPUCache/
-desktop/DawnGraphiteCache/
-desktop/DawnWebGPUCache/
-desktop/Crashpad/
-desktop/blob_storage/
-desktop/sentry/
+sessions/Cache/
+sessions/Code Cache/
+sessions/GPUCache/
+sessions/DawnGraphiteCache/
+sessions/DawnWebGPUCache/
+sessions/Crashpad/
+sessions/blob_storage/
+sessions/sentry/
 # transient code cache
 code/cache/
 code/telemetry/
@@ -571,7 +577,7 @@ do_tree() {
     done
   }
 
-  for t in code desktop; do
+  for t in code sessions; do
     [[ "$target" != "all" && "$target" != "$t" ]] && continue
     local tdir="$snap_dir/$t"
     [[ -d "$tdir" ]] || continue
@@ -730,15 +736,15 @@ usage() {
 Usage: claude-bak <command> [options]
 
 Backup & restore:
-  backup  [all|code|desktop] [--tag <name>]          Create a snapshot
-  restore [all|code|desktop] [snapshot-id|latest]    Restore a snapshot
+  backup  [all|code|sessions] [--tag <name>]          Create a snapshot
+  restore [all|code|sessions] [snapshot-id|latest]    Restore a snapshot
   list                                                Show all snapshots
   status                                              Show backup status
   sync    push|pull [--remote <url>]                  Git-based sync
   setup   local|git|icloud                            Configure backend
 
 Explore:
-  tree    [snapshot-id] [all|code|desktop]            Browse files + sizes
+  tree    [snapshot-id] [all|code|sessions]            Browse files + sizes
   diff    [snapshot-a] [snapshot-b]                   What changed between two snapshots
   show    [snapshot-id] <file-path>                   Print contents of a file
   find    <pattern> [snapshot-id]                     Search files by name

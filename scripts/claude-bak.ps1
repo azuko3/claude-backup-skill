@@ -2,8 +2,8 @@
 # Requires: PowerShell 5.1+ (built into Windows 10/11)
 #
 # Usage: claude-bak <command> [options]
-#   backup  [all|code|desktop] [-Tag <name>]
-#   restore [all|code|desktop] [snapshot-id|latest]
+#   backup  [all|code|sessions] [-Tag <name>]
+#   restore [all|code|sessions] [snapshot-id|latest]
 #   list
 #   status
 #   sync    push|pull [-Remote <url>]
@@ -160,14 +160,14 @@ function Do-Backup {
         Ok "Code: $(Count-Files $dest) files ($(Human-Size $dest))"
     }
 
-    if ($target -eq "all" -or $target -eq "desktop") {
-        Log "Backing up Claude Desktop …"
+    if ($target -eq "all" -or $target -eq "sessions") {
+        Log "Backing up Claude sessions …"
         if (-not (Test-Path $CLAUDE_DESKTOP_DIR)) {
             Warn "Claude Desktop directory not found — skipping"
         } else {
             $claudeProc = Get-Process "Claude" -ErrorAction SilentlyContinue
             if ($claudeProc) { Warn "Claude Desktop is running — backup will proceed but data may be inconsistent" }
-            $dest = Join-Path $snapDir "desktop"
+            $dest = Join-Path $snapDir "sessions"
             New-Item -ItemType Directory -Path $dest -Force | Out-Null
             Robocopy-Filtered $CLAUDE_DESKTOP_DIR $dest $DESKTOP_EXCLUDES
             Ok "Desktop: $(Count-Files $dest) files ($(Human-Size $dest))"
@@ -221,6 +221,12 @@ function Do-Restore {
 
     Write-Host ""
     Write-Host "This will overwrite your current Claude state with snapshot: $snapId" -ForegroundColor Yellow
+    if ($target -eq "all" -or $target -eq "code") {
+        Write-Host "  code:     full mirror — files not in snapshot will be deleted"
+    }
+    if ($target -eq "all" -or $target -eq "sessions") {
+        Write-Host "  sessions: overwrite only — new files added since backup will be kept"
+    }
     $answer = Read-Host "Continue? [y/N]"
     if ($answer.ToLower() -ne "y") { Log "Aborted."; exit 0 }
 
@@ -233,8 +239,8 @@ function Do-Restore {
         } else { Warn "No code backup in this snapshot" }
     }
 
-    if ($target -eq "all" -or $target -eq "desktop") {
-        $src = Join-Path $snapDir "desktop"
+    if ($target -eq "all" -or $target -eq "sessions") {
+        $src = Join-Path $snapDir "sessions"
         if (Test-Path $src) {
             $claudeProc = Get-Process "Claude" -ErrorAction SilentlyContinue
             if ($claudeProc) {
@@ -245,7 +251,7 @@ function Do-Restore {
             Log "Restoring Claude Desktop …"
             Robocopy-Filtered $src $CLAUDE_DESKTOP_DIR @()
             Ok "Desktop restored"
-        } else { Warn "No desktop backup in this snapshot" }
+        } else { Warn "No sessions backup in this snapshot" }
     }
 
     Ok "Restore complete from: $snapId"
@@ -372,9 +378,9 @@ function Do-Setup {
 
             # .gitignore
             @"
-desktop\Cache\
-desktop\Code Cache\
-desktop\GPUCache\
+sessions\Cache\
+sessions\Code Cache\
+sessions\GPUCache\
 code\cache\
 code\telemetry\
 "@ | Set-Content (Join-Path $BACKUP_ROOT ".gitignore")
@@ -434,7 +440,7 @@ function Do-Tree {
         }
     }
 
-    foreach ($t in @("code","desktop")) {
+    foreach ($t in @("code","sessions")) {
         if ($target -ne "all" -and $target -ne $t) { continue }
         $tdir = Join-Path $snapDir $t
         if (-not (Test-Path $tdir)) { continue }
@@ -558,15 +564,15 @@ function Show-Usage {
 Usage: claude-bak <command> [options]
 
 Backup & restore:
-  backup  [all|code|desktop] [-Tag <name>]     Create a snapshot
-  restore [all|code|desktop] [snapshot-id]     Restore (default: latest)
+  backup  [all|code|sessions] [-Tag <name>]     Create a snapshot
+  restore [all|code|sessions] [snapshot-id]     Restore (default: latest)
   list                                          Show all snapshots
   status                                        Show backup status
   sync    push|pull [-Remote <url>]             Git-based sync
   setup   local|git                             Configure backend
 
 Explore:
-  tree    [snapshot-id] [all|code|desktop]      Browse files + sizes
+  tree    [snapshot-id] [all|code|sessions]      Browse files + sizes
   diff    [snapshot-a] [snapshot-b]             What changed between two snapshots
   show    [snapshot-id] <file-path>             Print contents of a file
   find    <pattern> [snapshot-id]               Search files by name
