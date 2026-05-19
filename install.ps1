@@ -1,14 +1,43 @@
 # install.ps1 — one-time setup for claude-bak on Windows
 # Run from PowerShell: .\install.ps1
 #
+# What this script does (nothing hidden):
+#   1. Copies scripts/claude-bak.ps1 to %USERPROFILE%\AppData\Local\Microsoft\WindowsApps\
+#   2. Creates a claude-bak.cmd wrapper so the command works in any terminal
+#   3. Checks your PowerShell ExecutionPolicy and warns if scripts are restricted
+#   4. Optionally registers a daily Task Scheduler job at 09:00
+#   5. Runs: claude-bak status (read-only)
+#
+# What it does NOT do:
+#   - Does not modify %USERPROFILE%\.claude or any Claude files
+#   - Does not make network requests
+#   - Does not read your API keys or credentials
+#   - Does not run any backup automatically
+#
+# To review before running:
+#   Get-Content install.ps1
+#   Get-Content scripts\claude-bak.ps1
+#
 # If you get "running scripts is disabled", run first:
 #   Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 
-$ScriptDir  = Split-Path $MyInvocation.MyCommand.Path
-$ScriptSrc  = Join-Path $ScriptDir "scripts\claude-bak.ps1"
-$BinDir     = Join-Path $env:USERPROFILE "AppData\Local\Microsoft\WindowsApps"
-$BinTarget  = Join-Path $BinDir "claude-bak.ps1"
+param([switch]$DryRun)
+
+$ScriptDir     = Split-Path $MyInvocation.MyCommand.Path
+$ScriptSrc     = Join-Path $ScriptDir "scripts\claude-bak.ps1"
+$BinDir        = Join-Path $env:USERPROFILE "AppData\Local\Microsoft\WindowsApps"
+$BinTarget     = Join-Path $BinDir "claude-bak.ps1"
 $WrapperTarget = Join-Path $BinDir "claude-bak.cmd"
+
+if ($DryRun) {
+    Write-Host "[dry-run] What install.ps1 would do:" -ForegroundColor White
+    Write-Host "  Copy $ScriptSrc → $BinTarget"
+    Write-Host "  Create wrapper → $WrapperTarget"
+    Write-Host "  (optionally) Register Task Scheduler job: claude-bak backup all -Tag daily at 09:00"
+    Write-Host ""
+    Write-Host "Nothing was changed. Run without -DryRun to install." -ForegroundColor DarkGray
+    exit 0
+}
 
 Write-Host "Installing claude-bak ..." -ForegroundColor White
 
@@ -24,7 +53,6 @@ Copy-Item $ScriptSrc $BinTarget -Force
 Write-Host "✓ Installed → $BinTarget" -ForegroundColor Green
 
 # ── create cmd wrapper ───────────────────────────────────────────────────────
-# So the user can type `claude-bak` directly in any terminal
 @"
 @echo off
 powershell -ExecutionPolicy Bypass -File "%USERPROFILE%\AppData\Local\Microsoft\WindowsApps\claude-bak.ps1" %*
@@ -45,8 +73,8 @@ if ($policy -eq "Restricted" -or $policy -eq "Undefined") {
 Write-Host ""
 $answer = Read-Host "Set up a daily automatic backup? [y/N]"
 if ($answer.ToLower() -eq "y") {
-    $taskName   = "ClaudeDailyBackup"
-    $existing   = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    $taskName = "ClaudeDailyBackup"
+    $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     if ($existing) {
         Write-Host "⚠  Scheduled task already exists — skipping" -ForegroundColor Yellow
     } else {

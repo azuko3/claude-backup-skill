@@ -378,12 +378,32 @@ function Do-Setup {
 
             # .gitignore
             @"
+# ── credentials & sensitive files ────────────────────────────────────────────
+# These files may contain API keys, MCP tokens, and auth credentials.
+# NEVER commit these to a public repo.
+code\.claude.json
+code\auth\
+code\.credentials\
+code\mcp-needs-auth-cache.json
+
+# ── large runtime files ───────────────────────────────────────────────────────
 sessions\Cache\
 sessions\Code Cache\
 sessions\GPUCache\
+sessions\DawnGraphiteCache\
+sessions\DawnWebGPUCache\
+sessions\Crashpad\
+sessions\blob_storage\
+sessions\sentry\
+
+# ── transient code files ──────────────────────────────────────────────────────
 code\cache\
 code\telemetry\
+code\downloads\
 "@ | Set-Content (Join-Path $BACKUP_ROOT ".gitignore")
+
+            Warn "IMPORTANT: backups may contain API keys and MCP credentials."
+            Warn "Make sure your git remote is a PRIVATE repo, not public."
 
             git -C $BACKUP_ROOT remote remove origin 2>$null
             git -C $BACKUP_ROOT remote add origin $remoteUrl

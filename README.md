@@ -43,6 +43,43 @@ claude-bak backup all --tag safety
 
 ---
 
+## Security & trust
+
+**Before running any install script from the internet — read it first.** Here's exactly what this one does:
+
+```
+install.sh / install.ps1:
+  1. Copies scripts/claude-bak.sh (or .ps1) to ~/.local/bin/claude-bak
+  2. chmod +x on that file
+  3. Checks if ~/.local/bin is in your PATH
+  4. Optionally adds one cron/Task Scheduler job for daily backups
+  5. Runs: claude-bak status (read-only, no changes)
+
+  Does NOT touch ~/.claude or any Claude files.
+  Does NOT make network requests.
+  Does NOT read API keys or credentials.
+```
+
+To verify before running:
+```bash
+# macOS
+cat ~/.claude/skills/claude-backup/install.sh
+cat ~/.claude/skills/claude-backup/scripts/claude-bak.sh
+
+# or dry-run — prints what would happen, changes nothing
+bash install.sh --dry-run
+```
+
+```powershell
+# Windows dry-run
+.\install.ps1 -DryRun
+```
+
+**If you use the git backend — use a private repo.**
+`~/.claude/` may contain MCP tokens and API credentials. The `.gitignore` created by `claude-bak setup git` excludes known credential files, but the safest approach is always a private repository.
+
+---
+
 ## What it does
 
 A Claude Code skill that adds the `claude-bak` command.

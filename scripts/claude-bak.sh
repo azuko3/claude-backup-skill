@@ -463,7 +463,16 @@ do_setup() {
 
       # create .gitignore
       cat > "$BACKUP_ROOT/.gitignore" <<'GITIGNORE'
-# large electron caches — not worth storing
+# ── credentials & sensitive files ────────────────────────────────────────────
+# These files may contain API keys, MCP tokens, and auth credentials.
+# NEVER commit these to a public repo.
+code/.claude.json
+code/**/.claude.json
+code/auth/
+code/.credentials/
+code/mcp-needs-auth-cache.json
+
+# ── large runtime files (not worth storing) ───────────────────────────────────
 sessions/Cache/
 sessions/Code Cache/
 sessions/GPUCache/
@@ -472,11 +481,15 @@ sessions/DawnWebGPUCache/
 sessions/Crashpad/
 sessions/blob_storage/
 sessions/sentry/
-# transient code cache
+
+# ── transient code files ──────────────────────────────────────────────────────
 code/cache/
 code/telemetry/
 code/downloads/
 GITIGNORE
+
+      warn "IMPORTANT: backups may contain API keys and MCP credentials."
+      warn "Make sure your git remote is a PRIVATE repo, not public."
 
       git -C "$BACKUP_ROOT" remote remove origin 2>/dev/null || true
       git -C "$BACKUP_ROOT" remote add origin "$remote_url"

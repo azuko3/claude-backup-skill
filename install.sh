@@ -1,11 +1,43 @@
 #!/usr/bin/env bash
 # install.sh — one-time setup for claude-bak
+#
+# What this script does (nothing hidden):
+#   1. Copies scripts/claude-bak.sh to ~/.local/bin/claude-bak
+#   2. chmod +x on that file
+#   3. Checks if ~/.local/bin is in your PATH (prints a warning if not)
+#   4. Optionally adds one cron job: claude-bak backup all --tag daily at 09:00
+#   5. Runs: claude-bak status (read-only)
+#
+# What it does NOT do:
+#   - Does not modify ~/.claude or any Claude files
+#   - Does not make network requests
+#   - Does not read your API keys or credentials
+#   - Does not run any backup automatically
+#
+# To review before running:
+#   cat install.sh
+#   cat scripts/claude-bak.sh
 set -euo pipefail
 
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_SRC="$SKILL_DIR/scripts/claude-bak.sh"
 BIN_DIR="$HOME/.local/bin"
 BIN_TARGET="$BIN_DIR/claude-bak"
+
+DRY_RUN=false
+for arg in "$@"; do
+  [[ "$arg" == "--dry-run" ]] && DRY_RUN=true
+done
+
+if $DRY_RUN; then
+  printf '\033[1m[dry-run] What install.sh would do:\033[0m\n'
+  printf '  mkdir -p %s\n' "$BIN_DIR"
+  printf '  cp %s %s\n' "$SCRIPT_SRC" "$BIN_TARGET"
+  printf '  chmod +x %s\n' "$BIN_TARGET"
+  printf '  (optionally) add cron: 0 9 * * * %s backup all --tag daily\n' "$BIN_TARGET"
+  printf '\nNothing was changed. Run without --dry-run to install.\n'
+  exit 0
+fi
 
 printf '\033[1mInstalling claude-bak …\033[0m\n'
 
@@ -32,7 +64,6 @@ fi
 printf '\nSet up a daily automatic backup? [y/N] '
 read -r answer
 if [[ "$(echo "$answer" | tr '[:upper:]' '[:lower:]')" == "y" ]]; then
-  # check if cron entry already exists
   if crontab -l 2>/dev/null | grep -q "claude-bak backup"; then
     printf '\033[1;33m⚠\033[0m  Cron job already exists — skipping\n'
   else
