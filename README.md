@@ -2,83 +2,138 @@
 
 Backup, restore, and sync Claude state across machines.
 
-Covers:
-- **Claude Code** — `~/.claude/` (settings, skills, projects, sessions)
-- **Claude Desktop** — `~/Library/Application Support/Claude/` (Cowork sessions, IndexedDB, config)
+---
 
-## Install
+## ⚠️ קרא לפני שאתה מוחק כלום
+
+Claude שומר הכל בשני מקומות שאינם גיבוי אוטומטי:
+
+| מה | איפה | מה ייאבד אם תמחק |
+|----|------|-------------------|
+| הגדרות, skills, projects | `~/.claude/` | כל ה-skills שהתקנת, settings.json, היסטוריית projects |
+| Cowork sessions, קונפיגורציה | `~/Library/Application Support/Claude/` | **כל שיחות ה-Cowork**, sessions, הגדרות Desktop |
+
+**אם מחקת את אחד מהתיקיות האלה ואין לך backup — הנתונים אבדו לצמיתות.**
+
+### פקודות שמחקות ואי-אפשר לשחזר בלי backup
 
 ```bash
+# 🔴 מסוכן — מוחק את כל הגדרות Claude Code
+rm -rf ~/.claude
+
+# 🔴 מסוכן — מוחק את כל שיחות Cowork ואת Desktop
+rm -rf ~/Library/Application\ Support/Claude
+
+# 🔴 מסוכן — ניקוי "cache" שיכול לקחת גם sessions
+rm -rf ~/.claude/cache    # זה בטוח
+rm -rf ~/.claude/*        # זה מוחק הכל, לא רק cache
+```
+
+### לפני כל פעולה הרסנית — תמיד קודם
+
+```bash
+claude-bak backup all --tag safety
+```
+
+---
+
+## מה זה claude-backup
+
+Skill ל-Claude Code שמוסיף פקודת `claude-bak` — backup ושחזור של כל ה-state של Claude בלחיצה אחת.
+
+**מה מגובה:**
+- **code** — `~/.claude/` כולל settings, skills, projects, sessions
+- **desktop** — `~/Library/Application Support/Claude/` כולל Cowork sessions, IndexedDB, קונפיגורציה
+
+**מה מוחרג** (לא שווה לגבות — נוצר מחדש אוטומטית):
+- `Cache/`, `Code Cache/`, `GPUCache/`, `vm_bundles/` (12GB+ של runtime files)
+- `blob_storage/`, `Crashpad/`, `sentry/`
+- `~/.claude/cache/`, `~/.claude/telemetry/`
+
+---
+
+## התקנה
+
+```bash
+git clone https://github.com/azuko3/claude-backup-skill.git ~/.claude/skills/claude-backup
 bash ~/.claude/skills/claude-backup/install.sh
 ```
 
-This installs `claude-bak` to `~/.local/bin/`. Make sure that's in your `$PATH`.
-
-## Quick start
+ואז ודא ש-`~/.local/bin` נמצא ב-PATH שלך (add to `~/.zshrc`):
 
 ```bash
-claude-bak backup              # backup everything → ~/backups/claude/
-claude-bak list                # show all snapshots
-claude-bak restore             # restore latest snapshot
-claude-bak status              # show last backup, size, backend
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
-## Commands
+---
 
-| Command | Description |
-|---------|-------------|
-| `backup [all\|code\|desktop] [--tag name]` | Create a snapshot |
-| `restore [all\|code\|desktop] [id\|latest]` | Restore a snapshot |
-| `list` | Show all snapshots with sizes and tags |
-| `status` | Show status: last backup, backend, source sizes |
-| `sync push\|pull [--remote <url>]` | Git sync |
-| `setup local\|git\|icloud` | Configure backend |
+## שימוש
+
+```bash
+claude-bak backup              # גבה הכל
+claude-bak backup --tag weekly # עם תג לזיהוי
+claude-bak list                # כל ה-snapshots
+claude-bak restore             # שחזר את האחרון (עם y/n confirm)
+claude-bak status              # מתי גיבוי אחרון, מה הגודל
+```
+
+### כל הפקודות
+
+| פקודה | תיאור |
+|-------|--------|
+| `backup [all\|code\|desktop] [--tag name]` | יצירת snapshot |
+| `restore [all\|code\|desktop] [snapshot-id\|latest]` | שחזור |
+| `list` | כל ה-snapshots עם גדלים ותאריכים |
+| `status` | מצב: מתי גיבוי אחרון, backend, גדלי sources |
+| `sync push\|pull [--remote <url>]` | סנכרון דרך git |
+| `setup local\|git\|icloud` | הגדרת backend |
+
+---
 
 ## Backends
 
-### local (default)
-Snapshots saved to `~/backups/claude/`. Keeps the 10 most recent, auto-rotates older ones.
+### local (ברירת מחדל)
+Snapshots ב-`~/backups/claude/`. שומר 10 אחרונים, מוחק ישנים אוטומטית.
 
 ### git
-Push snapshots to a private git repo (GitHub, GitLab, etc.) for cross-machine sync.
+Push לריפו פרטי (GitHub/GitLab) — מאפשר סנכרון בין מחשבים.
 
 ```bash
 claude-bak setup git
-# enter your remote URL when prompted
+# מזין Remote URL
+claude-bak sync push   # שלח
+claude-bak sync pull   # קבל
 ```
 
 ### icloud
-Symlinks `~/Library/Application Support/Claude` into iCloud Drive for automatic sync.
+Symlink של `~/Library/Application Support/Claude` לתוך iCloud Drive.
 
 ```bash
 claude-bak setup icloud
 ```
 
-**Warning:** Never open Claude Desktop on two machines simultaneously with iCloud sync enabled.
+> **אזהרה:** לא לפתוח Claude Desktop על שני מחשבים בו-זמנית עם iCloud — הנתונים יתקלקלו.
 
-## Migrating to a new machine
+---
 
-On the old machine:
+## מעבר למחשב חדש
+
+**על המחשב הישן:**
 ```bash
 claude-bak backup all --tag pre-migration
-claude-bak setup git    # if not already set up
+claude-bak setup git
 claude-bak sync push
 ```
 
-On the new machine:
+**על המחשב החדש:**
 ```bash
-git clone <your-remote> ~/backups/claude
+git clone <remote-url> ~/backups/claude
 bash ~/.claude/skills/claude-backup/install.sh
 claude-bak restore all
 ```
 
-## What's excluded
+---
 
-The backup skips large cache directories that are rebuilt automatically:
-- `Cache/`, `Code Cache/`, `GPUCache/`, `DawnGraphiteCache/`, `DawnWebGPUCache/`
-- `blob_storage/`, `Crashpad/`, `sentry/`
-- `~/.claude/cache/`, `~/.claude/telemetry/`, `~/.claude/downloads/`
+## אבטחת ה-restore
 
-## Restore safety
-
-Every `restore` command automatically creates a `pre-restore` snapshot of your current state before overwriting anything, so you can always roll back.
+כל `restore` יוצר אוטומטית snapshot של המצב הנוכחי לפני שמשחזר, ושואל `y/n` לאישור. תמיד אפשר לחזור אחורה.
